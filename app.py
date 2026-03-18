@@ -8,7 +8,7 @@ import json
 import os
 import re
 
-from google import genai
+from cerebras.cloud.sdk import Cerebras
 import requests
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
@@ -19,7 +19,7 @@ from database import get_category_descriptions, get_examples_by_category  # cons
 load_dotenv()
 
 app = Flask(__name__)
-gemini = genai.Client(api_key=os.environ.get("GOOGLE_API_KEY"))
+cerebras = Cerebras(api_key=os.environ.get("CEREBRAS_API_KEY"))
 
 SYSTEM_PROMPT = (
     "Tu es un consultant expert en design d'intérieur de luxe et en art contemporain. "
@@ -261,23 +261,25 @@ Réponds UNIQUEMENT avec ce JSON (aucun texte avant ou après) :
 
 def analyze_with_claude(scraped: dict) -> dict:
     prompt = build_prompt(scraped)
-    full_prompt = f"{SYSTEM_PROMPT}\n\n{prompt}"
 
     try:
-        response = gemini.models.generate_content(
-            model="gemini-2.5-flash",
-            contents=full_prompt,
+        response = cerebras.chat.completions.create(
+            model="llama-3.3-70b",
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": prompt},
+            ],
         )
-        raw_text = response.text.strip()
+        raw_text = response.choices[0].message.content.strip()
     except Exception as e:
         err = str(e).lower()
-        if "api key" in err or "permission" in err or "unauthorized" in err:
-            raise ValueError("Clé API invalide. Vérifiez GOOGLE_API_KEY.")
-        if "quota" in err or "rate" in err or "resource exhausted" in err:
+        if "api key" in err or "permission" in err or "unauthorized" in err or "authentication" in err:
+            raise ValueError("Clé API invalide. Vérifiez CEREBRAS_API_KEY.")
+        if "quota" in err or "rate" in err or "limit" in err:
             raise ValueError("Limite d'utilisation de l'API atteinte. Réessayez dans quelques secondes.")
         if "connection" in err or "unavailable" in err:
-            raise ValueError("Erreur de connexion à l'API Gemini.")
-        raise ValueError(f"Erreur Gemini : {str(e)}")
+            raise ValueError("Erreur de connexion à l'API Cerebras.")
+        raise ValueError(f"Erreur Cerebras : {str(e)}")
 
     # Strip any accidental markdown fences
     if raw_text.startswith("```"):

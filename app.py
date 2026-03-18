@@ -264,7 +264,7 @@ def analyze_with_claude(scraped: dict) -> dict:
 
     try:
         response = cerebras.chat.completions.create(
-            model="llama-3.3-70b",
+            model="llama3.1-70b",
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": prompt},

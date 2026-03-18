@@ -284,14 +284,24 @@ def analyze_with_claude(scraped: dict) -> dict:
             raise ValueError("Erreur de connexion à l'API Cerebras.")
         raise ValueError(f"Erreur Cerebras : {str(e)}")
 
-    # Strip any accidental markdown fences
+    # Strip markdown fences
     if raw_text.startswith("```"):
         raw_text = re.sub(r"^```[a-z]*\n?", "", raw_text)
         raw_text = re.sub(r"\n?```$", "", raw_text)
 
+    # Try direct parse first, then extract first {...} block from response
+    result = None
     try:
         result = json.loads(raw_text)
     except json.JSONDecodeError:
+        match = re.search(r"\{.*\}", raw_text, re.DOTALL)
+        if match:
+            try:
+                result = json.loads(match.group())
+            except json.JSONDecodeError:
+                pass
+
+    if result is None:
         raise ValueError("L'analyse a produit une réponse inattendue. Réessayez.")
 
     # Recalculate score_global from criteria to avoid AI arithmetic errors

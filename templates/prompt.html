@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Éditeur de prompt — Studio Scorer</title>
+  <link rel="stylesheet" href="/static/style.css" />
+  <style>
+    .prompt-page { max-width: 860px; margin: 0 auto; padding: 2.5rem 1.5rem 4rem; }
+
+    .prompt-header { margin-bottom: 2rem; }
+    .prompt-header h1 { font-family: var(--font-serif); font-size: 2rem; font-weight: 300; color: var(--color-ink); }
+    .prompt-header p  { color: var(--color-graphite); margin-top: .4rem; font-size: .9rem; }
+
+    .prompt-badge {
+      display: inline-block; margin-top: .6rem;
+      padding: .2rem .7rem; border-radius: 20px; font-size: .78rem;
+      background: var(--color-linen); color: var(--color-graphite);
+      border: 1px solid rgba(158,155,148,.3);
+    }
+    .prompt-badge.modified {
+      background: rgba(184,169,122,.15); color: var(--color-gold);
+      border-color: rgba(184,169,122,.4);
+    }
+
+    .prompt-card {
+      background: var(--color-chalk);
+      border-radius: 12px;
+      box-shadow: var(--shadow-card);
+      padding: 1.8rem;
+    }
+
+    textarea {
+      width: 100%;
+      min-height: 520px;
+      font-family: 'Menlo', 'Consolas', monospace;
+      font-size: .82rem;
+      line-height: 1.65;
+      color: var(--color-ink);
+      background: var(--color-parchment);
+      border: 1px solid rgba(158,155,148,.35);
+      border-radius: 8px;
+      padding: 1rem 1.1rem;
+      resize: vertical;
+      outline: none;
+      transition: border-color .2s;
+    }
+    textarea:focus { border-color: var(--color-gold); }
+
+    .prompt-actions {
+      display: flex; gap: .8rem; margin-top: 1.2rem; align-items: center;
+    }
+
+    .btn-save {
+      padding: .6rem 1.6rem;
+      background: var(--color-ink); color: var(--color-chalk);
+      border: none; border-radius: 6px;
+      font-family: var(--font-sans); font-size: .88rem; font-weight: 400;
+      cursor: pointer; transition: background .2s;
+    }
+    .btn-save:hover { background: var(--color-graphite); }
+
+    .btn-reset {
+      padding: .6rem 1.2rem;
+      background: transparent; color: var(--color-stone);
+      border: 1px solid rgba(158,155,148,.4); border-radius: 6px;
+      font-family: var(--font-sans); font-size: .85rem;
+      cursor: pointer; transition: color .2s, border-color .2s;
+    }
+    .btn-reset:hover { color: var(--color-terra); border-color: var(--color-terra); }
+
+    .btn-back {
+      margin-left: auto;
+      color: var(--color-stone); font-size: .85rem; text-decoration: none;
+      transition: color .2s;
+    }
+    .btn-back:hover { color: var(--color-gold); }
+
+    .warning {
+      margin-top: 1rem;
+      padding: .7rem 1rem;
+      background: rgba(184,169,122,.1);
+      border-left: 3px solid var(--color-gold);
+      border-radius: 0 6px 6px 0;
+      font-size: .82rem; color: var(--color-graphite);
+    }
+  </style>
+</head>
+<body>
+  <div class="prompt-page">
+
+    <div class="prompt-header">
+      <h1>Éditeur de prompt</h1>
+      <p>Modifiez les instructions d'évaluation envoyées à l'IA pour chaque analyse.</p>
+      {% if is_default %}
+        <span class="prompt-badge">Prompt par défaut actif</span>
+      {% else %}
+        <span class="prompt-badge modified">Prompt modifié — actif en mémoire</span>
+      {% endif %}
+    </div>
+
+    <div class="prompt-card">
+      <form method="POST" action="/prompt">
+        <textarea name="instructions">{{ instructions }}</textarea>
+        <div class="prompt-actions">
+          <button type="submit" class="btn-save">Enregistrer</button>
+          <a href="/" class="btn-back">← Retour à l'outil</a>
+        </div>
+      </form>
+
+      {% if not is_default %}
+      <form method="POST" action="/prompt/reset" style="margin-top:.8rem;">
+        <button type="submit" class="btn-reset">Rétablir le prompt par défaut</button>
+      </form>
+      {% endif %}
+
+      <div class="warning">
+        Les modifications sont actives immédiatement mais se réinitialisent au redémarrage du serveur.
+        Pour les rendre permanentes, copiez le texte modifié dans <code>app.py</code> → <code>DEFAULT_SCORING_INSTRUCTIONS</code>.
+      </div>
+    </div>
+
+  </div>
+</body>
+</html>

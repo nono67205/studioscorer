@@ -12,7 +12,7 @@ from cerebras.cloud.sdk import Cerebras
 import requests
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, jsonify, redirect, render_template, request
 
 from database import get_category_descriptions, get_examples_by_category  # conservé, non utilisé
 
@@ -161,19 +161,83 @@ def scrape_website(url: str) -> dict:
 # GEMINI ANALYSIS
 # ─────────────────────────────────────────────────────────────────────────────
 
-NADEGE_REFERENCE = """
-Nadège Mouyssinat est sculptrice contemporaine. Ses œuvres :
-- Matériaux : pierre, marbre, béton ciré, résine — tons neutres (blanc, gris, noir, beige)
-- Formes : organiques ou géométriques épurées, minimalistes, "statement pieces" museum-quality
-- Prix : 2 500 € à 13 000 €
-- Espaces adaptés : résidentiel luxe contemporain, hôtellerie boutique haut de gamme,
-  galeries d'art, bureaux de direction, espaces épurés à volumes purs
-- Espaces inadaptés : intérieurs baroques/maximalistes/très chargés, commerces grand public
+DEFAULT_SCORING_INSTRUCTIONS = """SCULPTURES NADÈGE MOUYSSINAT :
+Sculptures contemporaines en pierre, marbre, béton ciré, résine.
+Formes organiques épurées ou géométriques — surfaces texturées ou polies.
+Palette exclusive : blanc, gris, beige, noir, taupe.
+Pièces statement museum-quality (40 cm–1 m), prix 2 500–13 000 €.
+Elles s'intègrent dans des espaces à forte respiration architecturale,
+aux côtés d'un art sobre et structurant — pas décoratif.
 
-Style Nadège côté design d'intérieur : palette neutre, lignes nettes, volumes purs, luxe discret.
-Style Nadège côté art : sculpture contemporaine sobre, pas de peinture figurative académique,
-pas d'art très coloré ou décoratif grand public.
-"""
+═══ CRITÈRE 1 — LUXE (0 à 3 points) ═══
+Évalue le niveau de positionnement marché du studio.
+
+3 points — Ultra-premium :
+  Clients explicites : milliardaires, familles royales, jets privés, yachts, palaces,
+  hôtels ultra-luxe (Aman, Cheval Blanc, Rosewood niveau flagship).
+  Tarifs ou projets manifestement dans le top 1% mondial.
+
+1–2 points — Premium :
+  Résidentiel haut de gamme (appartements/villas > 2M€ visibles),
+  hôtellerie luxe standard, clientèle aisée confirmée.
+  2 pts si clairement affirmé, 1 pt si probable mais ambigu.
+
+0 point — Non premium :
+  Marché accessible, projets commerciaux standard, aucun signal de luxe.
+
+═══ CRITÈRE 2 — STYLE NADÈGE (0 à 2 points) ═══
+IMPORTANT : Regarde les photos de projets et d'œuvres d'art présentes sur le site.
+Pose-toi cette question : "Une sculpture en pierre sobre et organique de Nadège
+trouverait-elle naturellement sa place dans ces espaces ou aux côtés de ces œuvres ?"
+Tu NE compares PAS le style du site à un style abstrait — tu évalues la compatibilité
+concrète entre les espaces/œuvres montrés et les sculptures de Nadège.
+
+2 points — Forte compatibilité :
+  Projets avec volumes clairs, matières nobles (marbre, béton, plâtre, bois brut),
+  espaces épurés avec de la respiration autour des objets, palette neutre dominante.
+  Art déjà présent sous forme de sculptures contemporaines sobres, pièces abstraites
+  organiques, céramiques statement — ambiance "quiet luxury", raffinement discret.
+
+1 point — Compatibilité partielle :
+  Quelques projets compatibles mélangés à des styles plus chargés ou colorés.
+  Style globalement élégant mais pas clairement aligné avec les sculptures de Nadège.
+
+0 point — Incompatible :
+  Intérieurs maximalistes, très colorés, baroques, très chargés en motifs.
+  Art figuratif académique, pop art criard, peintures très colorées, décoratif grand public.
+  Projets dominés par couleurs vives, patterns forts, ou ornements surchargés.
+
+═══ CRITÈRE 3 — BONUS ART (0 ou 1 point) ═══
++1 si mention EXPLICITE sur le site d'un service d'intégration d'œuvres d'art :
+"art advisory", "art sourcing", "sélection d'œuvres", "nous plaçons des œuvres
+pour nos clients", "accompagnement artistique", "curation", ou équivalent.
+0 si aucune mention explicite de ce type de service.
+
+═══ CALCUL ═══
+score_global = luxe_score + style_score + bonus_art
+Si score_global > 5, plafonner à 5.
+
+═══ RÈGLES ABSOLUES ═══
+- luxe : entier strictement entre 0 et 3.
+- style : entier strictement entre 0 et 2.
+- bonus_art : strictement 0 ou 1.
+- score_global = somme des trois, plafonné à 5, minimum 1.
+- L'explication_globale indique EXPLICITEMENT les notes obtenues :
+  "Luxe : X/3 — [raison courte]. Style Nadège : X/2 — [raison courte]. Bonus art : X/1."
+
+Réponds UNIQUEMENT avec ce JSON (aucun texte avant ou après) :
+{
+  "score_global": <entier 1-5>,
+  "explication_globale": "<Luxe : X/3 — raison. Style Nadège : X/2 — raison. Bonus art : X/1.>",
+  "criteres": {
+    "luxe":      { "score": <0-3>, "max": 3, "label": "Positionnement Luxe",  "explication": "<str>" },
+    "style":     { "score": <0-2>, "max": 2, "label": "Style Nadège",         "explication": "<str>" },
+    "bonus_art": { "score": <0|1>, "max": 1, "label": "Intégration d'Art",    "explication": "<str>" }
+  }
+}"""
+
+# Mutable at runtime via /prompt — resets on service restart
+_scoring_instructions = DEFAULT_SCORING_INSTRUCTIONS
 
 
 def build_prompt(scraped: dict) -> str:
@@ -189,74 +253,13 @@ NAVIGATION : {nav_str}
 MENTIONS PRESSE / AWARDS : {scraped['award_press_text'][:400] or '—'}
 EXTRAIT GÉNÉRAL : {scraped['all_text_excerpt'][:1500]}"""
 
-    instructions = f"""RÉFÉRENCE — ŒUVRES DE NADÈGE MOUYSSINAT :
-{NADEGE_REFERENCE}
-
-INSTRUCTION : Évalue ce site selon 5 critères binaires. Chaque critère vaut exactement 1 si validé,
-0 sinon. Le score_global est la somme des 5 critères (entier de 0 à 5).
-
-━━━ CRITÈRES ━━━
-
-1. secteur_pertinent (+1)
-   Le site appartient à un cabinet d'architecte d'intérieur, un studio de design d'intérieur,
-   ou un consultant / galeriste en art destiné aux particuliers ou à l'hôtellerie.
-   → Score 0 si : architecte d'extérieur pur, agence immobilière, décorateur grand public,
-     agence de communication, autre secteur non lié au design intérieur ou à l'art.
-
-2. segment_premium (+1)
-   L'entreprise se positionne explicitement ou implicitement dans le segment premium
-   ou ultra-premium : résidentiel de luxe, hôtellerie haut de gamme, yacht, jet privé,
-   clientèle fortunée (UHNWI), tarifs ou projets manifestement élevés.
-   → Score 0 si : marché grand public, prix accessibles, projets commerciaux standard.
-
-3. style_nadege (+1)
-   Le portfolio ou les réalisations présentées montrent une esthétique cohérente avec
-   les sculptures de Nadège : intérieurs modernes, minimalistes, épurés, palette neutre
-   (blanc/gris/beige/noir), volumes purs, luxe discret.
-   Pour les consultants en art : les œuvres présentées sont contemporaines et sobres
-   (sculpture, abstrait épuré) — pas de peinture figurative académique, pas d'art
-   très coloré ou maximaliste.
-   → Score 0 si : style baroque, maximaliste, très coloré, ou très chargé.
-
-4. integration_art (+1)
-   Le studio ou consultant intègre déjà des œuvres d'art dans ses projets :
-   photos d'intérieurs avec sculptures ou œuvres d'art visibles dans le portfolio,
-   section dédiée à l'art dans la navigation, collaboration mentionnée avec des artistes
-   ou galeries, ou mise en avant de pièces artistiques dans leur communication.
-   → Score 0 si : aucune trace d'art dans les projets présentés.
-
-5. recherche_oeuvres (+1)
-   Mention explicite d'une activité de recherche, sourcing ou prescription d'œuvres d'art
-   pour les clients : "art advisory", "art sourcing", "sélection d'œuvres", "nous trouvons
-   des œuvres pour nos clients", "accompagnement artistique", "curation", ou équivalent.
-   → Score 0 si : aucune mention de ce type de service.
-
-━━━ RÈGLES ABSOLUES ━━━
-- Chaque score de critère est STRICTEMENT 0 ou 1 (pas de 0.5, pas d'autre valeur).
-- score_global = somme exacte des 5 scores critères.
-- L'explication de chaque critère commence par le verdict : "+1 →" ou "0 →" puis la raison.
-- L'explication_globale mentionne les points validés et les manques clés.
-
-Réponds UNIQUEMENT avec ce JSON (aucun texte avant ou après) :
-{{
-  "score_global": <entier 0-5>,
-  "explication_globale": "<2-3 phrases de synthèse en français>",
-  "criteres": {{
-    "secteur_pertinent":  {{ "score": <0 ou 1>, "label": "Secteur Pertinent",    "explication": "<str>" }},
-    "segment_premium":    {{ "score": <0 ou 1>, "label": "Segment Premium",       "explication": "<str>" }},
-    "style_nadege":       {{ "score": <0 ou 1>, "label": "Style Nadège",          "explication": "<str>" }},
-    "integration_art":    {{ "score": <0 ou 1>, "label": "Intégration d'Art",     "explication": "<str>" }},
-    "recherche_oeuvres":  {{ "score": <0 ou 1>, "label": "Recherche d'Œuvres",   "explication": "<str>" }}
-  }}
-}}"""
-
     return f"""=== DONNÉES DU SITE À ANALYSER ===
 
 {site_section}
 
 === INSTRUCTIONS D'ÉVALUATION ===
 
-{instructions}"""
+{_scoring_instructions}"""
 
 
 def analyze_with_claude(scraped: dict) -> dict:
@@ -357,6 +360,28 @@ def clay_webhook():
     except Exception as e:
         app.logger.error("Clay webhook error: %s", str(e))
         return jsonify({"score_global": None, "explication_globale": None, "error": "Erreur inattendue."})
+
+
+@app.route("/prompt", methods=["GET", "POST"])
+def prompt_editor():
+    global _scoring_instructions
+    if request.method == "POST":
+        new_instructions = (request.form.get("instructions") or "").strip()
+        if new_instructions:
+            _scoring_instructions = new_instructions
+        return redirect("/prompt")
+    return render_template(
+        "prompt.html",
+        instructions=_scoring_instructions,
+        is_default=(_scoring_instructions == DEFAULT_SCORING_INSTRUCTIONS),
+    )
+
+
+@app.route("/prompt/reset", methods=["POST"])
+def prompt_reset():
+    global _scoring_instructions
+    _scoring_instructions = DEFAULT_SCORING_INSTRUCTIONS
+    return redirect("/prompt")
 
 
 @app.route("/health")

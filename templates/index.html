@@ -125,7 +125,7 @@
 
     <!-- Footer -->
     <footer class="footer">
-      5 critères binaires — Secteur · Premium · Style Nadège · Art intégré · Sourcing d'œuvres
+      Scoring — Luxe /3 · Style Nadège /2 · Bonus Art /1 — Total /5
     </footer>
 
   </div>
@@ -261,13 +261,14 @@
       const criteres = data.criteres || {};
 
       Object.entries(criteres).forEach(([key, val], index) => {
-        const pct = val.score * 100;
+        const maxScore = val.max !== undefined ? val.max : 1;
+        const pct = (val.score / maxScore) * 100;
         const row = document.createElement('div');
         row.className = 'criterion-row';
         row.innerHTML = `
           <div class="criterion-header">
             <span class="criterion-label">${val.label || key}</span>
-            <span class="criterion-score-num">${val.score}/5</span>
+            <span class="criterion-score-num">${val.score}/${maxScore}</span>
           </div>
           <div class="criterion-bar-track">
             <div class="criterion-bar-fill" data-width="${pct}"></div>

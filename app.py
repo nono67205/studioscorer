@@ -294,7 +294,14 @@ def analyze_with_claude(scraped: dict) -> dict:
     except json.JSONDecodeError:
         raise ValueError("L'analyse a produit une réponse inattendue. Réessayez.")
 
-    result["score_global"] = max(1, min(5, result.get("score_global", 1)))
+    # Recalculate score_global from criteria to avoid AI arithmetic errors
+    criteres = result.get("criteres", {})
+    computed = sum(
+        int(v.get("score", 0))
+        for v in criteres.values()
+        if isinstance(v, dict)
+    )
+    result["score_global"] = max(1, min(5, computed))
     return result
 
 

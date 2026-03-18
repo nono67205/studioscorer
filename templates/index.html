@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Studio Scorer — Nadège Mouyssinat</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+
+  <div class="page">
+
+    <!-- Header -->
+    <header class="header">
+      <p class="header-eyebrow">Nadège Mouyssinat — Outil de prospection</p>
+      <h1 class="header-title">Studio Scorer</h1>
+      <p class="header-subtitle">
+        Analysez n'importe quel studio de design ou d'architecture.<br>
+        L'IA évalue sa pertinence pour placer les sculptures Nadège Mouyssinat.
+      </p>
+      <div class="header-separator" aria-hidden="true">
+        <span class="sep-line sep-line--secondary"></span>
+        <span class="sep-line sep-line--primary"></span>
+        <span class="sep-line sep-line--secondary"></span>
+      </div>
+    </header>
+
+    <!-- Input Form -->
+    <section class="form-section">
+      <div class="input-row">
+        <input
+          type="url"
+          id="url-input"
+          class="url-input"
+          placeholder="https://studio-exemple.com"
+          autocomplete="off"
+          spellcheck="false"
+        />
+        <button id="analyze-btn" class="analyze-btn" onclick="analyzeURL()">
+          <span id="btn-label">Analyser</span>
+        </button>
+      </div>
+      <p id="input-error" class="input-error" style="display:none;"></p>
+
+      <!-- Loading progress bar -->
+      <div class="loading-progress" id="loading-progress">
+        <div class="loading-progress-fill" id="loading-progress-fill"></div>
+      </div>
+    </section>
+
+    <!-- Loading indicator -->
+    <div id="loading-indicator" class="loading-indicator" aria-live="polite">
+      <div class="loading-lines" aria-hidden="true">
+        <div class="loading-line"></div>
+        <div class="loading-line"></div>
+        <div class="loading-line"></div>
+      </div>
+      <p class="loading-text" id="loading-text">Analyse en cours…</p>
+    </div>
+
+    <!-- Error Banner -->
+    <div id="error-banner" class="error-banner" style="display:none;" role="alert">
+      <span id="error-message"></span>
+    </div>
+
+    <!-- Results Card -->
+    <div id="results-card" class="results-card" style="display:none;">
+
+      <div class="results-header">
+
+        <!-- SVG Arc Score -->
+        <div class="score-arc-wrapper">
+          <svg
+            class="score-arc-svg"
+            viewBox="0 0 120 120"
+            xmlns="http://www.w3.org/2000/svg"
+            aria-hidden="true"
+          >
+            <!--
+              r = 54, cx = cy = 60
+              circumference = 2 * π * 54 ≈ 339.29
+              arc_length = 339.29 * 0.75 ≈ 254.47  (270° = 75% of full circle)
+              Arc starts at -225° from positive x-axis = 135° from top = bottom-left
+              stroke-dasharray = "254.47 339.29"
+              Initial dashoffset = 254.47 (fully hidden)
+            -->
+            <circle
+              class="score-arc-track"
+              cx="60" cy="60" r="54"
+              stroke-dasharray="254.47 339.29"
+              stroke-dashoffset="0"
+              transform="rotate(135, 60, 60)"
+            />
+            <circle
+              id="score-arc-fill"
+              class="score-arc-fill"
+              cx="60" cy="60" r="54"
+              stroke-dasharray="254.47 339.29"
+              stroke-dashoffset="254.47"
+              transform="rotate(135, 60, 60)"
+            />
+            <text
+              id="score-arc-number"
+              class="score-arc-number"
+              x="60" y="62"
+            >—</text>
+          </svg>
+          <span class="score-arc-label">Score global</span>
+        </div>
+
+        <div class="results-meta">
+          <p id="results-url" class="results-url"></p>
+          <p id="results-summary" class="results-summary"></p>
+        </div>
+
+      </div>
+
+      <div class="divider" aria-hidden="true"></div>
+
+      <div id="criteria-list" class="criteria-list"></div>
+
+    </div>
+
+    <!-- Footer -->
+    <footer class="footer">
+      5 critères binaires — Secteur · Premium · Style Nadège · Art intégré · Sourcing d'œuvres
+    </footer>
+
+  </div>
+
+  <script>
+    /* ─── Constants ─────────────────────────────────── */
+    const ARC_R             = 54;
+    const ARC_CIRCUMFERENCE = 2 * Math.PI * ARC_R;   // ≈ 339.29
+    const ARC_LENGTH        = ARC_CIRCUMFERENCE * 0.75; // ≈ 254.47  (270°)
+
+    const LOADING_PHRASES = [
+      'Lecture du site en cours…',
+      'Vérification du secteur et du positionnement…',
+      'Analyse du style et de l\'esthétique…',
+      'Recherche de liens avec l\'art…',
+    ];
+
+    let isLoading        = false;
+    let phraseTimer      = null;
+    let progressTimer    = null;
+
+    /* ─── Score helpers ──────────────────────────────── */
+    function scoreColor(score) {
+      if (score <= 2)  return 'var(--color-terra)';
+      if (score === 3) return 'var(--color-clay)';
+      if (score === 4) return 'var(--color-gold)';
+      return 'var(--color-moss)';
+    }
+
+    /* ─── Loading state ──────────────────────────────── */
+    function setLoading(loading) {
+      isLoading = loading;
+      const btn       = document.getElementById('analyze-btn');
+      const label     = document.getElementById('btn-label');
+      const indicator = document.getElementById('loading-indicator');
+      const progress  = document.getElementById('loading-progress');
+      const fill      = document.getElementById('loading-progress-fill');
+
+      if (loading) {
+        btn.disabled = true;
+        label.textContent = 'Analyse…';
+
+        // Show loading indicator
+        indicator.classList.add('active');
+
+        // Rotating phrases
+        let i = 0;
+        document.getElementById('loading-text').textContent = LOADING_PHRASES[0];
+        phraseTimer = setInterval(() => {
+          i = (i + 1) % LOADING_PHRASES.length;
+          const el = document.getElementById('loading-text');
+          el.style.opacity = '0';
+          setTimeout(() => {
+            el.textContent = LOADING_PHRASES[i];
+            el.style.opacity = '1';
+          }, 300);
+        }, 3000);
+
+        // Progress bar
+        progress.classList.add('active');
+        // Force reflow so transition fires from 0%
+        fill.style.transition = 'none';
+        fill.style.width = '0%';
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            fill.style.transition = 'width 25s linear';
+            fill.classList.add('running');
+          });
+        });
+
+      } else {
+        btn.disabled = false;
+        label.textContent = 'Analyser';
+
+        // Stop phrases
+        clearInterval(phraseTimer);
+        indicator.classList.remove('active');
+
+        // Reset progress bar
+        progress.classList.remove('active');
+        fill.classList.remove('running');
+        fill.style.transition = 'none';
+        fill.style.width = '0%';
+      }
+    }
+
+    /* ─── Error helpers ──────────────────────────────── */
+    function showInputError(msg) {
+      const el = document.getElementById('input-error');
+      el.textContent = msg;
+      el.style.display = 'block';
+    }
+
+    function showErrorBanner(msg) {
+      const el = document.getElementById('error-banner');
+      document.getElementById('error-message').textContent = msg;
+      el.style.display = 'flex';
+    }
+
+    /* ─── Render results ─────────────────────────────── */
+    function renderResults(data, url) {
+      const urlEl      = document.getElementById('results-url');
+      const summaryEl  = document.getElementById('results-summary');
+      const criteriaEl = document.getElementById('criteria-list');
+      const card       = document.getElementById('results-card');
+      const arcFill    = document.getElementById('score-arc-fill');
+      const arcNumber  = document.getElementById('score-arc-number');
+
+      const score = data.score_global;
+
+      /* -- Animate SVG arc -- */
+      const color  = scoreColor(score);
+      const target = ARC_LENGTH - (score / 5) * ARC_LENGTH;
+
+      arcFill.style.stroke = color;
+      arcNumber.style.fill = color;
+      arcNumber.textContent = score;
+
+      // Start from fully hidden, then animate to target
+      arcFill.style.strokeDashoffset = ARC_LENGTH;
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          arcFill.style.strokeDashoffset = target;
+        });
+      });
+
+      /* -- Meta -- */
+      urlEl.textContent     = url;
+      summaryEl.textContent = data.explication_globale || '';
+
+      /* -- Criteria rows -- */
+      criteriaEl.innerHTML = '';
+      const criteres = data.criteres || {};
+
+      Object.entries(criteres).forEach(([key, val], index) => {
+        const pct = val.score * 100;
+        const row = document.createElement('div');
+        row.className = 'criterion-row';
+        row.innerHTML = `
+          <div class="criterion-header">
+            <span class="criterion-label">${val.label || key}</span>
+            <span class="criterion-score-num">${val.score}/5</span>
+          </div>
+          <div class="criterion-bar-track">
+            <div class="criterion-bar-fill" data-width="${pct}"></div>
+          </div>
+          <p class="criterion-explication">${val.explication || ''}</p>
+        `;
+        criteriaEl.appendChild(row);
+      });
+
+      /* -- Reveal card -- */
+      card.style.display = 'block';
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          card.classList.add('visible');
+
+          // Stagger bar animations
+          const bars = criteriaEl.querySelectorAll('.criterion-bar-fill');
+          bars.forEach((bar, i) => {
+            setTimeout(() => {
+              bar.style.width = bar.dataset.width + '%';
+            }, i * 80);
+          });
+        });
+      });
+    }
+
+    /* ─── Main analyze ───────────────────────────────── */
+    async function analyzeURL() {
+      if (isLoading) return;
+
+      const input       = document.getElementById('url-input');
+      const errorEl     = document.getElementById('input-error');
+      const errorBanner = document.getElementById('error-banner');
+      const resultsCard = document.getElementById('results-card');
+
+      let url = input.value.trim();
+
+      // Hide previous results / errors
+      errorEl.style.display    = 'none';
+      errorBanner.style.display = 'none';
+      resultsCard.style.display = 'none';
+      resultsCard.classList.remove('visible');
+
+      if (!url) {
+        showInputError('Veuillez entrer une URL.');
+        return;
+      }
+
+      // Auto-prepend https://
+      if (!url.startsWith('http://') && !url.startsWith('https://')) {
+        url = 'https://' + url;
+        input.value = url;
+      }
+
+      setLoading(true);
+
+      try {
+        const res  = await fetch('/analyze', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url }),
+        });
+        const data = await res.json();
+
+        if (data.success) {
+          renderResults(data.data, data.url);
+        } else {
+          showErrorBanner(data.error || 'Erreur inconnue.');
+        }
+      } catch (err) {
+        showErrorBanner('Impossible de contacter le serveur. Vérifiez que l\'application est lancée.');
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    /* ─── Enter key ──────────────────────────────────── */
+    document.addEventListener('DOMContentLoaded', () => {
+      document.getElementById('url-input').addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') analyzeURL();
+      });
+    });
+  </script>
+
+</body>
+</html>
